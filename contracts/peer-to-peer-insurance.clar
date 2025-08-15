@@ -4,26 +4,26 @@
 ;; and automated risk assessment
 
 ;; --- Constants and Error Codes ---
-(define-constant CONTRACT_OWNER tx-sender)
-(define-constant ERR_NOT_AUTHORIZED (err u300))
-(define-constant ERR_NOT_FOUND (err u301))
-(define-constant ERR_INSUFFICIENT_BALANCE (err u302))
-(define-constant ERR_INVALID_AMOUNT (err u303))
-(define-constant ERR_POOL_FULL (err u304))
-(define-constant ERR_CLAIM_EXPIRED (err u305))
-(define-constant ERR_CLAIM_ALREADY_PROCESSED (err u306))
-(define-constant ERR_INSUFFICIENT_VALIDATORS (err u307))
-(define-constant ERR_ALREADY_VALIDATED (err u308))
-(define-constant ERR_INVALID_RISK_SCORE (err u309))
-(define-constant ERR_PAYOUT_FAILED (err u310))
+(define-constant CONTRACT-OWNER tx-sender)
+(define-constant ERR-NOT-AUTHORIZED (err u300))
+(define-constant ERR-NOT-FOUND (err u301))
+(define-constant ERR-INSUFFICIENT-BALANCE (err u302))
+(define-constant ERR-INVALID-AMOUNT (err u303))
+(define-constant ERR-POOL-FULL (err u304))
+(define-constant ERR-CLAIM-EXPIRED (err u305))
+(define-constant ERR-CLAIM-ALREADY-PROCESSED (err u306))
+(define-constant ERR-INSUFFICIENT-VALIDATORS (err u307))
+(define-constant ERR-ALREADY-VALIDATED (err u308))
+(define-constant ERR-INVALID-RISK-SCORE (err u309))
+(define-constant ERR-PAYOUT-FAILED (err u310))
 
-(define-constant MIN_POOL_STAKE u1000000) ;; 1000 STX in microSTX
-(define-constant MIN_VALIDATOR_STAKE u500000) ;; 500 STX in microSTX
-(define-constant MAX_POOL_SIZE u100) ;; Maximum participants per pool
-(define-constant CLAIM_VALIDATION_PERIOD u1008) ;; ~1 week in blocks
-(define-constant MIN_VALIDATORS_REQUIRED u3)
-(define-constant VALIDATOR_CONSENSUS_THRESHOLD u66) ;; 66% agreement needed
-(define-constant PREMIUM_RATE_BASE u1000) ;; 10% annual premium base rate
+(define-constant MIN-POOL-STAKE u1000000) ;; 1000 STX in microSTX
+(define-constant MIN-VALIDATOR-STAKE u500000) ;; 500 STX in microSTX
+(define-constant MAX-POOL-SIZE u100) ;; Maximum participants per pool
+(define-constant CLAIM-VALIDATION-PERIOD u1008) ;; ~1 week in blocks
+(define-constant MIN-VALIDATORS-REQUIRED u3)
+(define-constant VALIDATOR-CONSENSUS-THRESHOLD u66) ;; 66% agreement needed
+(define-constant PREMIUM-RATE-BASE u1000) ;; 10% annual premium base rate
 
 ;; --- Data Variables ---
 (define-data-var next-pool-id uint u1)
@@ -38,7 +38,7 @@
 ;; Insurance pools
 (define-map insurance-pools uint {
   pool-name: (string-ascii 64),
-  pool-type: (string-ascii 32), ;; "health", "property", "travel", etc.
+  pool-type: (string-ascii 32),
   creator: principal,
   total-staked: uint,
   total-coverage: uint,
@@ -56,7 +56,7 @@
   stake-amount: uint,
   coverage-amount: uint,
   premium-paid: uint,
-  risk-score: uint, ;; 1-100, higher = riskier
+  risk-score: uint,
   join-block: uint,
   last-premium-block: uint,
   active: bool
@@ -78,14 +78,14 @@
   validators-rejected: uint,
   total-validator-stake: uint,
   approved-validator-stake: uint,
-  status: (string-ascii 16), ;; "pending", "approved", "rejected", "paid"
+  status: (string-ascii 16),
   payout-amount: uint
 })
 
 ;; Claim validators
 (define-map claim-validators { claim-id: uint, validator: principal } {
   stake-amount: uint,
-  vote: (optional bool), ;; true = approve, false = reject
+  vote: (optional bool),
   vote-block: uint,
   evidence-reviewed: bool
 })
@@ -94,14 +94,14 @@
 (define-map validators principal {
   stake-amount: uint,
   claims-validated: uint,
-  accuracy-score: uint, ;; Percentage of correct validations
+  accuracy-score: uint,
   total-rewards: uint,
   active: bool,
   specialization: (string-ascii 32)
 })
 
 ;; Pool membership tracking
-(define-map pool-memberships { pool-id: uint, member: principal } uint) ;; policy-id
+(define-map pool-memberships { pool-id: uint, member: principal } uint)
 
 ;; Risk assessment data
 (define-map risk-factors { pool-type: (string-ascii 32), factor: (string-ascii 32) } uint)
@@ -114,8 +114,8 @@
   (max-coverage-per-claim uint)
   (base-premium-rate uint))
   (let ((pool-id (var-get next-pool-id)))
-    (asserts! (> max-coverage-per-claim u0) ERR_INVALID_AMOUNT)
-    (asserts! (and (> base-premium-rate u0) (<= base-premium-rate u5000)) ERR_INVALID_AMOUNT) ;; Max 50% premium
+    (asserts! (> max-coverage-per-claim u0) ERR-INVALID-AMOUNT)
+    (asserts! (and (> base-premium-rate u0) (<= base-premium-rate u5000)) ERR-INVALID-AMOUNT)
 
     (map-set insurance-pools pool-id {
       pool-name: pool-name,
@@ -139,13 +139,13 @@
 )
 
 (define-public (join-insurance-pool (pool-id uint) (stake-amount uint) (coverage-amount uint))
-  (let ((pool (unwrap! (map-get? insurance-pools pool-id) ERR_NOT_FOUND))
+  (let ((pool (unwrap! (map-get? insurance-pools pool-id) ERR-NOT-FOUND))
         (policy-id (var-get next-policy-id)))
-    (asserts! (get active pool) ERR_NOT_FOUND)
-    (asserts! (>= stake-amount MIN_POOL_STAKE) ERR_INSUFFICIENT_BALANCE)
-    (asserts! (<= coverage-amount (get max-coverage-per-claim pool)) ERR_INVALID_AMOUNT)
-    (asserts! (< (get participant-count pool) MAX_POOL_SIZE) ERR_POOL_FULL)
-    (asserts! (is-none (map-get? pool-memberships { pool-id: pool-id, member: tx-sender })) ERR_NOT_AUTHORIZED)
+    (asserts! (get active pool) ERR-NOT-FOUND)
+    (asserts! (>= stake-amount MIN-POOL-STAKE) ERR-INSUFFICIENT-BALANCE)
+    (asserts! (<= coverage-amount (get max-coverage-per-claim pool)) ERR-INVALID-AMOUNT)
+    (asserts! (< (get participant-count pool) MAX-POOL-SIZE) ERR-POOL-FULL)
+    (asserts! (is-none (map-get? pool-memberships { pool-id: pool-id, member: tx-sender })) ERR-NOT-AUTHORIZED)
 
     ;; Calculate risk score and premium
     (let ((risk-score (calculate-risk-score tx-sender (get pool-type pool)))
@@ -186,15 +186,15 @@
 
 (define-public (register-as-validator (stake-amount uint) (specialization (string-ascii 32)))
   (begin
-    (asserts! (>= stake-amount MIN_VALIDATOR_STAKE) ERR_INSUFFICIENT_BALANCE)
-    (asserts! (is-none (map-get? validators tx-sender)) ERR_NOT_AUTHORIZED)
+    (asserts! (>= stake-amount MIN-VALIDATOR-STAKE) ERR-INSUFFICIENT-BALANCE)
+    (asserts! (is-none (map-get? validators tx-sender)) ERR-NOT-AUTHORIZED)
 
     (try! (stx-transfer? stake-amount tx-sender (as-contract tx-sender)))
 
     (map-set validators tx-sender {
       stake-amount: stake-amount,
       claims-validated: u0,
-      accuracy-score: u100, ;; Start with perfect score
+      accuracy-score: u100,
       total-rewards: u0,
       active: true,
       specialization: specialization
@@ -206,7 +206,7 @@
 )
 
 (define-public (increase-validator-stake (additional-amount uint))
-  (let ((validator-info (unwrap! (map-get? validators tx-sender) ERR_NOT_FOUND)))
+  (let ((validator-info (unwrap! (map-get? validators tx-sender) ERR-NOT-FOUND)))
     (try! (stx-transfer? additional-amount tx-sender (as-contract tx-sender)))
 
     (map-set validators tx-sender 
@@ -227,13 +227,13 @@
   (description (string-ascii 256))
   (evidence-hash (string-ascii 64)))
   (let ((claim-id (var-get next-claim-id))
-        (pool (unwrap! (map-get? insurance-pools pool-id) ERR_NOT_FOUND))
-        (policy-id (unwrap! (map-get? pool-memberships { pool-id: pool-id, member: tx-sender }) ERR_NOT_FOUND))
-        (policy (unwrap! (map-get? pool-policies policy-id) ERR_NOT_FOUND)))
+        (pool (unwrap! (map-get? insurance-pools pool-id) ERR-NOT-FOUND))
+        (policy-id (unwrap! (map-get? pool-memberships { pool-id: pool-id, member: tx-sender }) ERR-NOT-FOUND))
+        (policy (unwrap! (map-get? pool-policies policy-id) ERR-NOT-FOUND)))
 
-    (asserts! (get active policy) ERR_NOT_FOUND)
-    (asserts! (<= claim-amount (get coverage-amount policy)) ERR_INVALID_AMOUNT)
-    (asserts! (<= claim-amount (get max-coverage-per-claim pool)) ERR_INVALID_AMOUNT)
+    (asserts! (get active policy) ERR-NOT-FOUND)
+    (asserts! (<= claim-amount (get coverage-amount policy)) ERR-INVALID-AMOUNT)
+    (asserts! (<= claim-amount (get max-coverage-per-claim pool)) ERR-INVALID-AMOUNT)
 
     (map-set insurance-claims claim-id {
       claimant: tx-sender,
@@ -244,7 +244,7 @@
       description: description,
       evidence-hash: evidence-hash,
       submission-block: block-height,
-      validation-deadline: (+ block-height CLAIM_VALIDATION_PERIOD),
+      validation-deadline: (+ block-height CLAIM-VALIDATION-PERIOD),
       validators-assigned: u0,
       validators-approved: u0,
       validators-rejected: u0,
@@ -261,13 +261,13 @@
 )
 
 (define-public (validate-claim (claim-id uint) (approve bool) (stake-amount uint))
-  (let ((claim (unwrap! (map-get? insurance-claims claim-id) ERR_NOT_FOUND))
-        (validator-info (unwrap! (map-get? validators tx-sender) ERR_NOT_FOUND)))
-    (asserts! (get active validator-info) ERR_NOT_AUTHORIZED)
-    (asserts! (< block-height (get validation-deadline claim)) ERR_CLAIM_EXPIRED)
-    (asserts! (is-eq (get status claim) "pending") ERR_CLAIM_ALREADY_PROCESSED)
-    (asserts! (is-none (map-get? claim-validators { claim-id: claim-id, validator: tx-sender })) ERR_ALREADY_VALIDATED)
-    (asserts! (<= stake-amount (get stake-amount validator-info)) ERR_INSUFFICIENT_BALANCE)
+  (let ((claim (unwrap! (map-get? insurance-claims claim-id) ERR-NOT-FOUND))
+        (validator-info (unwrap! (map-get? validators tx-sender) ERR-NOT-FOUND)))
+    (asserts! (get active validator-info) ERR-NOT-AUTHORIZED)
+    (asserts! (< block-height (get validation-deadline claim)) ERR-CLAIM-EXPIRED)
+    (asserts! (is-eq (get status claim) "pending") ERR-CLAIM-ALREADY-PROCESSED)
+    (asserts! (is-none (map-get? claim-validators { claim-id: claim-id, validator: tx-sender })) ERR-ALREADY-VALIDATED)
+    (asserts! (<= stake-amount (get stake-amount validator-info)) ERR-INSUFFICIENT-BALANCE)
 
     (map-set claim-validators { claim-id: claim-id, validator: tx-sender } {
       stake-amount: stake-amount,
@@ -292,9 +292,15 @@
           approved-validator-stake: new-approved-stake
         }))
 
+      ;; Update validator stats
+      (map-set validators tx-sender
+        (merge validator-info {
+          claims-validated: (+ (get claims-validated validator-info) u1)
+        }))
+
       ;; Check if we have enough validators and can process the claim
-      (if (>= new-validators-assigned MIN_VALIDATORS_REQUIRED)
-        (try! (process-claim-if-ready claim-id))
+      (if (>= new-validators-assigned MIN-VALIDATORS-REQUIRED)
+        (process-claim-if-ready claim-id)
         (ok true)
       )
     )
@@ -303,14 +309,13 @@
 
 (define-private (process-claim-if-ready (claim-id uint))
   (let ((claim (unwrap-panic (map-get? insurance-claims claim-id))))
-    (if (>= (get validators-assigned claim) MIN_VALIDATORS_REQUIRED)
+    (if (>= (get validators-assigned claim) MIN-VALIDATORS-REQUIRED)
       (let ((approval-rate (/ (* (get approved-validator-stake claim) u100) (get total-validator-stake claim))))
-        (if (>= approval-rate VALIDATOR_CONSENSUS_THRESHOLD)
+        (if (>= approval-rate VALIDATOR-CONSENSUS-THRESHOLD)
           (begin
             ;; Approve and process payout
             (map-set insurance-claims claim-id (merge claim { status: "approved" }))
-            (try! (process-payout claim-id))
-            (ok true)
+            (process-payout claim-id)
           )
           (begin
             ;; Reject claim
@@ -328,18 +333,50 @@
   (let ((claim (unwrap-panic (map-get? insurance-claims claim-id))))
     (if (is-eq (get status claim) "approved")
       (begin
-        (try! (as-contract (stx-transfer? (get claim-amount claim) tx-sender (get claimant claim))))
-        (map-set insurance-claims claim-id 
-          (merge claim { 
-            status: "paid", 
-            payout-amount: (get claim-amount claim) 
-          }))
-        (var-set total-claims-processed (+ (var-get total-claims-processed) u1))
-        (var-set total-payouts (+ (var-get total-payouts) (get claim-amount claim)))
-        (print { type: "claim-paid", claim-id: claim-id, amount: (get claim-amount claim) })
-        (ok true)
+        (match (as-contract (stx-transfer? (get claim-amount claim) tx-sender (get claimant claim)))
+          success (begin
+            (map-set insurance-claims claim-id 
+              (merge claim { 
+                status: "paid", 
+                payout-amount: (get claim-amount claim) 
+              }))
+            (var-set total-claims-processed (+ (var-get total-claims-processed) u1))
+            (var-set total-payouts (+ (var-get total-payouts) (get claim-amount claim)))
+            (print { type: "claim-paid", claim-id: claim-id, amount: (get claim-amount claim) })
+            (ok true)
+          )
+          error ERR-PAYOUT-FAILED
+        )
       )
-      ERR_PAYOUT_FAILED
+      ERR-PAYOUT-FAILED
+    )
+  )
+)
+
+;; --- Premium Collection ---
+
+(define-public (pay-premium (policy-id uint))
+  (let ((policy (unwrap! (map-get? pool-policies policy-id) ERR-NOT-FOUND))
+        (pool (unwrap! (map-get? insurance-pools (get pool-id policy)) ERR-NOT-FOUND)))
+    (asserts! (is-eq tx-sender (get policyholder policy)) ERR-NOT-AUTHORIZED)
+    (asserts! (get active policy) ERR-NOT-FOUND)
+
+    ;; Calculate blocks since last payment (simplified monthly payment)
+    (let ((blocks-since-payment (- block-height (get last-premium-block policy)))
+          (monthly-blocks u4320) ;; Approximately 30 days
+          (monthly-premium (/ (get premium-paid policy) u12)))
+
+      (asserts! (>= blocks-since-payment monthly-blocks) ERR-INVALID-AMOUNT)
+
+      (try! (stx-transfer? monthly-premium tx-sender (as-contract tx-sender)))
+
+      (map-set pool-policies policy-id
+        (merge policy {
+          last-premium-block: block-height
+        }))
+
+      (print { type: "premium-paid", policy-id: policy-id, amount: monthly-premium })
+      (ok true)
     )
   )
 )
@@ -347,10 +384,10 @@
 ;; --- Utility Functions ---
 
 (define-private (calculate-risk-score (user principal) (pool-type (string-ascii 32)))
-  ;; Simplified risk calculation - in production would use more sophisticated algorithms
-  (let ((base-risk u50)) ;; Base risk score of 50
+  ;; Simplified risk calculation
+  (let ((base-risk u50))
     (if (is-eq pool-type "health")
-      (+ base-risk u10) ;; Health insurance has higher base risk
+      (+ base-risk u10)
       (if (is-eq pool-type "property")
         (+ base-risk u5)
         base-risk
@@ -360,8 +397,8 @@
 )
 
 (define-private (calculate-premium (coverage-amount uint) (base-rate uint) (risk-score uint))
-  (let ((risk-multiplier (+ u100 risk-score))) ;; Risk score adds to base 100%
-    (/ (* (* coverage-amount base-rate) risk-multiplier) u1000000) ;; Normalize
+  (let ((risk-multiplier (+ u100 risk-score)))
+    (/ (* (* coverage-amount base-rate) risk-multiplier) u1000000)
   )
 )
 
@@ -405,17 +442,41 @@
   })
 )
 
-(define-read-only (calculate-pool-health (pool-id uint))
+(define-read-only (get-pool-health (pool-id uint))
   (match (map-get? insurance-pools pool-id)
     pool (let ((utilization-rate (if (> (get total-staked pool) u0)
                                    (/ (* (get total-coverage pool) u100) (get total-staked pool))
                                    u0)))
-           (some {
+           (ok {
              total-staked: (get total-staked pool),
              total-coverage: (get total-coverage pool),
              utilization-rate: utilization-rate,
-             participant-count: (get participant-count pool)
+             participant-count: (get participant-count pool),
+             active: (get active pool)
            }))
-    none
+    (err ERR-NOT-FOUND)
+  )
+)
+
+(define-read-only (is-claim-claimable (claim-id uint))
+  (match (map-get? insurance-claims claim-id)
+    claim (ok (and 
+            (is-eq (get status claim) "approved")
+            (is-eq (get payout-amount claim) u0)))
+    (err ERR-NOT-FOUND)
+  )
+)
+
+(define-read-only (get-validator-performance (validator principal))
+  (match (map-get? validators validator)
+    validator-info (ok {
+      stake-amount: (get stake-amount validator-info),
+      claims-validated: (get claims-validated validator-info),
+      accuracy-score: (get accuracy-score validator-info),
+      total-rewards: (get total-rewards validator-info),
+      active: (get active validator-info),
+      specialization: (get specialization validator-info)
+    })
+    (err ERR-NOT-FOUND)
   )
 )
