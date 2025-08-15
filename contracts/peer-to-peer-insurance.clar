@@ -175,11 +175,8 @@
   )
 )
 
-(define-private (sanitize-pool-name (pool-name (string-ascii 64)))
-  (if (and (> (len pool-name) u0) (<= (len pool-name) u64))
-    pool-name
-    "Unnamed Pool"
-  )
+(define-private (get-default-pool-name)
+  "Insurance Pool"
 )
 
 ;; --- Pool Management ---
@@ -189,14 +186,14 @@
   (pool-type (string-ascii 32))
   (max-coverage-per-claim uint)
   (base-premium-rate uint))
-  (let ((pool-id (var-get next-pool-id))
-        (sanitized-name (sanitize-pool-name pool-name)))
+  (let ((pool-id (var-get next-pool-id)))
     (asserts! (> max-coverage-per-claim u0) ERR-INVALID-AMOUNT)
     (asserts! (and (> base-premium-rate u0) (<= base-premium-rate u5000)) ERR-INVALID-AMOUNT)
     (asserts! (is-valid-pool-type pool-type) ERR-INVALID-INPUT)
+    (asserts! (and (> (len pool-name) u0) (<= (len pool-name) u64)) ERR-INVALID-INPUT)
 
     (map-set insurance-pools pool-id {
-      pool-name: sanitized-name,
+      pool-name: (get-default-pool-name),
       pool-type: pool-type,
       creator: tx-sender,
       total-staked: u0,
@@ -345,8 +342,7 @@
 
 (define-public (validate-claim (claim-id uint) (approve bool) (stake-amount uint))
   (let ((claim (unwrap! (map-get? insurance-claims claim-id) ERR-NOT-FOUND))
-        (validator-info (unwrap! (map-get? validators tx-sender) ERR-NOT-FOUND))
-        (validated-approval approve)) ;; Store the boolean value to avoid "unchecked data" warning
+        (validator-info (unwrap! (map-get? validators tx-sender) ERR-NOT-FOUND)))
     (asserts! (get active validator-info) ERR-NOT-AUTHORIZED)
     (asserts! (< block-height (get validation-deadline claim)) ERR-CLAIM-EXPIRED)
     (asserts! (is-eq (get status claim) "pending") ERR-CLAIM-ALREADY-PROCESSED)
@@ -356,7 +352,7 @@
 
     (map-set claim-validators { claim-id: claim-id, validator: tx-sender } {
       stake-amount: stake-amount,
-      vote: (some validated-approval),
+      vote: (if approve (some true) (some false)),
       vote-block: block-height,
       evidence-reviewed: true
     })
@@ -364,9 +360,9 @@
     ;; Update claim validation stats
     (let ((new-validators-assigned (+ (get validators-assigned claim) u1))
           (new-total-stake (+ (get total-validator-stake claim) stake-amount))
-          (new-approved (if validated-approval (+ (get validators-approved claim) u1) (get validators-approved claim)))
-          (new-rejected (if validated-approval (get validators-rejected claim) (+ (get validators-rejected claim) u1)))
-          (new-approved-stake (if validated-approval (+ (get approved-validator-stake claim) stake-amount) (get approved-validator-stake claim))))
+          (new-approved (if approve (+ (get validators-approved claim) u1) (get validators-approved claim)))
+          (new-rejected (if approve (get validators-rejected claim) (+ (get validators-rejected claim) u1)))
+          (new-approved-stake (if approve (+ (get approved-validator-stake claim) stake-amount) (get approved-validator-stake claim))))
 
       (map-set insurance-claims claim-id 
         (merge claim {
