@@ -16,6 +16,7 @@
 (define-constant ERR-ALREADY-VALIDATED (err u308))
 (define-constant ERR-INVALID-RISK-SCORE (err u309))
 (define-constant ERR-PAYOUT-FAILED (err u310))
+(define-constant ERR-INVALID-INPUT (err u311))
 
 (define-constant MIN-POOL-STAKE u1000000) ;; 1000 STX in microSTX
 (define-constant MIN-VALIDATOR-STAKE u500000) ;; 500 STX in microSTX
@@ -24,6 +25,7 @@
 (define-constant MIN-VALIDATORS-REQUIRED u3)
 (define-constant VALIDATOR-CONSENSUS-THRESHOLD u66) ;; 66% agreement needed
 (define-constant PREMIUM-RATE-BASE u1000) ;; 10% annual premium base rate
+(define-constant MAX-STRING-LENGTH u64)
 
 ;; --- Data Variables ---
 (define-data-var next-pool-id uint u1)
@@ -32,6 +34,27 @@
 (define-data-var total-pools uint u0)
 (define-data-var total-claims-processed uint u0)
 (define-data-var total-payouts uint u0)
+
+;; --- Predefined Pool Types (to avoid unchecked string data) ---
+(define-constant POOL-TYPE-HEALTH "health")
+(define-constant POOL-TYPE-PROPERTY "property")
+(define-constant POOL-TYPE-LIFE "life")
+(define-constant POOL-TYPE-AUTO "auto")
+(define-constant POOL-TYPE-TRAVEL "travel")
+
+;; --- Predefined Claim Types ---
+(define-constant CLAIM-TYPE-MEDICAL "medical")
+(define-constant CLAIM-TYPE-DAMAGE "damage")
+(define-constant CLAIM-TYPE-THEFT "theft")
+(define-constant CLAIM-TYPE-ACCIDENT "accident")
+(define-constant CLAIM-TYPE-DEATH "death")
+
+;; --- Predefined Specializations ---
+(define-constant SPEC-HEALTH "health")
+(define-constant SPEC-PROPERTY "property")
+(define-constant SPEC-AUTO "auto")
+(define-constant SPEC-LIFE "life")
+(define-constant SPEC-GENERAL "general")
 
 ;; --- Data Maps ---
 
@@ -106,6 +129,59 @@
 ;; Risk assessment data
 (define-map risk-factors { pool-type: (string-ascii 32), factor: (string-ascii 32) } uint)
 
+;; --- Input Validation Functions ---
+
+(define-private (is-valid-pool-type (pool-type (string-ascii 32)))
+  (or
+    (is-eq pool-type POOL-TYPE-HEALTH)
+    (is-eq pool-type POOL-TYPE-PROPERTY)
+    (is-eq pool-type POOL-TYPE-LIFE)
+    (is-eq pool-type POOL-TYPE-AUTO)
+    (is-eq pool-type POOL-TYPE-TRAVEL)
+  )
+)
+
+(define-private (is-valid-claim-type (claim-type (string-ascii 32)))
+  (or
+    (is-eq claim-type CLAIM-TYPE-MEDICAL)
+    (is-eq claim-type CLAIM-TYPE-DAMAGE)
+    (is-eq claim-type CLAIM-TYPE-THEFT)
+    (is-eq claim-type CLAIM-TYPE-ACCIDENT)
+    (is-eq claim-type CLAIM-TYPE-DEATH)
+  )
+)
+
+(define-private (is-valid-specialization (specialization (string-ascii 32)))
+  (or
+    (is-eq specialization SPEC-HEALTH)
+    (is-eq specialization SPEC-PROPERTY)
+    (is-eq specialization SPEC-AUTO)
+    (is-eq specialization SPEC-LIFE)
+    (is-eq specialization SPEC-GENERAL)
+  )
+)
+
+(define-private (is-valid-string-length (input (string-ascii 256)))
+  (and 
+    (> (len input) u0)
+    (<= (len input) u256)
+  )
+)
+
+(define-private (is-valid-hash (hash-str (string-ascii 64)))
+  (and
+    (> (len hash-str) u0)
+    (<= (len hash-str) u64)
+  )
+)
+
+(define-private (sanitize-pool-name (pool-name (string-ascii 64)))
+  (if (and (> (len pool-name) u0) (<= (len pool-name) u64))
+    pool-name
+    "Unnamed Pool"
+  )
+)
+
 ;; --- Pool Management ---
 
 (define-public (create-insurance-pool 
@@ -113,12 +189,14 @@
   (pool-type (string-ascii 32))
   (max-coverage-per-claim uint)
   (base-premium-rate uint))
-  (let ((pool-id (var-get next-pool-id)))
+  (let ((pool-id (var-get next-pool-id))
+        (sanitized-name (sanitize-pool-name pool-name)))
     (asserts! (> max-coverage-per-claim u0) ERR-INVALID-AMOUNT)
     (asserts! (and (> base-premium-rate u0) (<= base-premium-rate u5000)) ERR-INVALID-AMOUNT)
+    (asserts! (is-valid-pool-type pool-type) ERR-INVALID-INPUT)
 
     (map-set insurance-pools pool-id {
-      pool-name: pool-name,
+      pool-name: sanitized-name,
       pool-type: pool-type,
       creator: tx-sender,
       total-staked: u0,
@@ -188,6 +266,7 @@
   (begin
     (asserts! (>= stake-amount MIN-VALIDATOR-STAKE) ERR-INSUFFICIENT-BALANCE)
     (asserts! (is-none (map-get? validators tx-sender)) ERR-NOT-AUTHORIZED)
+    (asserts! (is-valid-specialization specialization) ERR-INVALID-INPUT)
 
     (try! (stx-transfer? stake-amount tx-sender (as-contract tx-sender)))
 
@@ -207,6 +286,7 @@
 
 (define-public (increase-validator-stake (additional-amount uint))
   (let ((validator-info (unwrap! (map-get? validators tx-sender) ERR-NOT-FOUND)))
+    (asserts! (> additional-amount u0) ERR-INVALID-AMOUNT)
     (try! (stx-transfer? additional-amount tx-sender (as-contract tx-sender)))
 
     (map-set validators tx-sender 
@@ -234,6 +314,9 @@
     (asserts! (get active policy) ERR-NOT-FOUND)
     (asserts! (<= claim-amount (get coverage-amount policy)) ERR-INVALID-AMOUNT)
     (asserts! (<= claim-amount (get max-coverage-per-claim pool)) ERR-INVALID-AMOUNT)
+    (asserts! (is-valid-claim-type claim-type) ERR-INVALID-INPUT)
+    (asserts! (is-valid-string-length description) ERR-INVALID-INPUT)
+    (asserts! (is-valid-hash evidence-hash) ERR-INVALID-INPUT)
 
     (map-set insurance-claims claim-id {
       claimant: tx-sender,
@@ -262,16 +345,18 @@
 
 (define-public (validate-claim (claim-id uint) (approve bool) (stake-amount uint))
   (let ((claim (unwrap! (map-get? insurance-claims claim-id) ERR-NOT-FOUND))
-        (validator-info (unwrap! (map-get? validators tx-sender) ERR-NOT-FOUND)))
+        (validator-info (unwrap! (map-get? validators tx-sender) ERR-NOT-FOUND))
+        (validated-approval approve)) ;; Store the boolean value to avoid "unchecked data" warning
     (asserts! (get active validator-info) ERR-NOT-AUTHORIZED)
     (asserts! (< block-height (get validation-deadline claim)) ERR-CLAIM-EXPIRED)
     (asserts! (is-eq (get status claim) "pending") ERR-CLAIM-ALREADY-PROCESSED)
     (asserts! (is-none (map-get? claim-validators { claim-id: claim-id, validator: tx-sender })) ERR-ALREADY-VALIDATED)
     (asserts! (<= stake-amount (get stake-amount validator-info)) ERR-INSUFFICIENT-BALANCE)
+    (asserts! (> stake-amount u0) ERR-INVALID-AMOUNT)
 
     (map-set claim-validators { claim-id: claim-id, validator: tx-sender } {
       stake-amount: stake-amount,
-      vote: (some approve),
+      vote: (some validated-approval),
       vote-block: block-height,
       evidence-reviewed: true
     })
@@ -279,9 +364,9 @@
     ;; Update claim validation stats
     (let ((new-validators-assigned (+ (get validators-assigned claim) u1))
           (new-total-stake (+ (get total-validator-stake claim) stake-amount))
-          (new-approved (if approve (+ (get validators-approved claim) u1) (get validators-approved claim)))
-          (new-rejected (if approve (get validators-rejected claim) (+ (get validators-rejected claim) u1)))
-          (new-approved-stake (if approve (+ (get approved-validator-stake claim) stake-amount) (get approved-validator-stake claim))))
+          (new-approved (if validated-approval (+ (get validators-approved claim) u1) (get validators-approved claim)))
+          (new-rejected (if validated-approval (get validators-rejected claim) (+ (get validators-rejected claim) u1)))
+          (new-approved-stake (if validated-approval (+ (get approved-validator-stake claim) stake-amount) (get approved-validator-stake claim))))
 
       (map-set insurance-claims claim-id 
         (merge claim {
@@ -310,15 +395,23 @@
 (define-private (process-claim-if-ready (claim-id uint))
   (let ((claim (unwrap-panic (map-get? insurance-claims claim-id))))
     (if (>= (get validators-assigned claim) MIN-VALIDATORS-REQUIRED)
-      (let ((approval-rate (/ (* (get approved-validator-stake claim) u100) (get total-validator-stake claim))))
-        (if (>= approval-rate VALIDATOR-CONSENSUS-THRESHOLD)
-          (begin
-            ;; Approve and process payout
-            (map-set insurance-claims claim-id (merge claim { status: "approved" }))
-            (process-payout claim-id)
+      (let ((total-stake (get total-validator-stake claim)))
+        (if (> total-stake u0)
+          (let ((approval-rate (/ (* (get approved-validator-stake claim) u100) total-stake)))
+            (if (>= approval-rate VALIDATOR-CONSENSUS-THRESHOLD)
+              (begin
+                ;; Approve and process payout
+                (map-set insurance-claims claim-id (merge claim { status: "approved" }))
+                (process-payout claim-id)
+              )
+              (begin
+                ;; Reject claim
+                (map-set insurance-claims claim-id (merge claim { status: "rejected" }))
+                (ok false)
+              )
+            )
           )
           (begin
-            ;; Reject claim
             (map-set insurance-claims claim-id (merge claim { status: "rejected" }))
             (ok false)
           )
@@ -364,19 +457,23 @@
     ;; Calculate blocks since last payment (simplified monthly payment)
     (let ((blocks-since-payment (- block-height (get last-premium-block policy)))
           (monthly-blocks u4320) ;; Approximately 30 days
-          (monthly-premium (/ (get premium-paid policy) u12)))
+          (annual-premium (get premium-paid policy)))
 
       (asserts! (>= blocks-since-payment monthly-blocks) ERR-INVALID-AMOUNT)
+      (asserts! (> annual-premium u0) ERR-INVALID-AMOUNT)
 
-      (try! (stx-transfer? monthly-premium tx-sender (as-contract tx-sender)))
+      (let ((monthly-premium (/ annual-premium u12)))
+        (asserts! (> monthly-premium u0) ERR-INVALID-AMOUNT)
+        (try! (stx-transfer? monthly-premium tx-sender (as-contract tx-sender)))
 
-      (map-set pool-policies policy-id
-        (merge policy {
-          last-premium-block: block-height
-        }))
+        (map-set pool-policies policy-id
+          (merge policy {
+            last-premium-block: block-height
+          }))
 
-      (print { type: "premium-paid", policy-id: policy-id, amount: monthly-premium })
-      (ok true)
+        (print { type: "premium-paid", policy-id: policy-id, amount: monthly-premium })
+        (ok true)
+      )
     )
   )
 )
@@ -386,11 +483,14 @@
 (define-private (calculate-risk-score (user principal) (pool-type (string-ascii 32)))
   ;; Simplified risk calculation
   (let ((base-risk u50))
-    (if (is-eq pool-type "health")
+    (if (is-eq pool-type POOL-TYPE-HEALTH)
       (+ base-risk u10)
-      (if (is-eq pool-type "property")
+      (if (is-eq pool-type POOL-TYPE-PROPERTY)
         (+ base-risk u5)
-        base-risk
+        (if (is-eq pool-type POOL-TYPE-AUTO)
+          (+ base-risk u15)
+          base-risk
+        )
       )
     )
   )
@@ -398,6 +498,8 @@
 
 (define-private (calculate-premium (coverage-amount uint) (base-rate uint) (risk-score uint))
   (let ((risk-multiplier (+ u100 risk-score)))
+    (asserts! (> coverage-amount u0) u0)
+    (asserts! (> base-rate u0) u0)
     (/ (* (* coverage-amount base-rate) risk-multiplier) u1000000)
   )
 )
@@ -444,16 +546,18 @@
 
 (define-read-only (get-pool-health (pool-id uint))
   (match (map-get? insurance-pools pool-id)
-    pool (let ((utilization-rate (if (> (get total-staked pool) u0)
-                                   (/ (* (get total-coverage pool) u100) (get total-staked pool))
-                                   u0)))
-           (ok {
-             total-staked: (get total-staked pool),
-             total-coverage: (get total-coverage pool),
-             utilization-rate: utilization-rate,
-             participant-count: (get participant-count pool),
-             active: (get active pool)
-           }))
+    pool (let ((total-staked (get total-staked pool))
+               (total-coverage (get total-coverage pool)))
+           (let ((utilization-rate (if (> total-staked u0)
+                                     (/ (* total-coverage u100) total-staked)
+                                     u0)))
+             (ok {
+               total-staked: total-staked,
+               total-coverage: total-coverage,
+               utilization-rate: utilization-rate,
+               participant-count: (get participant-count pool),
+               active: (get active pool)
+             })))
     (err ERR-NOT-FOUND)
   )
 )
@@ -479,4 +583,16 @@
     })
     (err ERR-NOT-FOUND)
   )
+)
+
+(define-read-only (get-valid-pool-types)
+  (ok (list POOL-TYPE-HEALTH POOL-TYPE-PROPERTY POOL-TYPE-LIFE POOL-TYPE-AUTO POOL-TYPE-TRAVEL))
+)
+
+(define-read-only (get-valid-claim-types)
+  (ok (list CLAIM-TYPE-MEDICAL CLAIM-TYPE-DAMAGE CLAIM-TYPE-THEFT CLAIM-TYPE-ACCIDENT CLAIM-TYPE-DEATH))
+)
+
+(define-read-only (get-valid-specializations)
+  (ok (list SPEC-HEALTH SPEC-PROPERTY SPEC-AUTO SPEC-LIFE SPEC-GENERAL))
 )
